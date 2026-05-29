@@ -22,3 +22,9 @@ wheels/
 # Marimo-generated files
 **/__marimo__/session/
 **/__marimo__/cache/
+
+# Data folders
+raw_data/
+processed_data/
+results/
+figures/
