@@ -1,0 +1,97 @@
+import os
+import re
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+def plot_plate_view(df, column_name, title, label, save_dir, fmt=3, display=True, cmap="magma"):
+    # --- Parse well_id into row (A–H) and column (1–12) ---
+    def split_well_id(well):
+        match = re.match(r"([A-H])(\d{1,2})", str(well))
+        if match:
+            row, col = match.groups()
+            return row, int(col)
+        return None, None
+
+    df[["row", "col"]] = df["well_id"].apply(lambda x: pd.Series(split_well_id(x)))
+
+    # --- Pivot into 96-well plate layout ---
+    plate_matrix = df.pivot(index="row", columns="col", values=column_name)
+
+    # Reindex rows and columns to enforce full plate structure
+    rows = list("ABCDEFGH")
+    cols = list(range(1, 13))
+    plate_matrix = plate_matrix.reindex(index=rows, columns=cols)
+
+    # --- Plot heatmap ---
+    plt.figure(figsize=(12, 6))
+    ax = sns.heatmap(
+        plate_matrix,
+        cmap=cmap,  # or "coolwarm", "magma" etc.
+        linewidths=0.5,
+        linecolor="gray",
+        cbar_kws={'label': label},
+        annot=True, fmt=f".{fmt}f"
+    )
+
+    plt.title(title, fontsize=14)
+    plt.xlabel("Column")
+    plt.ylabel("Row")
+
+    # Rotate row (y-axis) labels 90° to the right
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=-90, va="center")
+
+    # --- Save plot ---
+    save_dir_full = f"{save_dir}/plate_view/{column_name}"
+    os.makedirs(save_dir_full, exist_ok=True)
+    save_path = os.path.join(save_dir_full, f"{title}_{column_name}.png")
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    if display:
+        plt.show()
+    else:
+        plt.close()
+
+    print(f"Saved plate view to {save_path}")
+
+def get_1st_99th_percentile(series):
+    """
+    Returns the 1st and 99th percentile values of a pandas Series as a tuple (min, max).
+    """
+    p1 = series.quantile(0.01)
+    p99 = series.quantile(0.99)
+    return (p1, p99)
+
+def merge_csv_files(results_directory, df_conditions):
+
+    # Get all csv files
+    csv_files = sorted(results_directory.glob("*.csv"))
+
+    if not csv_files:
+        raise ValueError("No CSV files found in folder")
+
+    df = pd.concat(
+        [pd.read_csv(f) for f in csv_files],
+        ignore_index=True
+    )
+
+    df_merged = df.merge(
+        df_conditions,
+        left_on="well_id",
+        right_on="well_id",
+        how="left"
+    )
+
+    # Sanity check: Wells in df without condition info
+    missing = df_merged["condition"].isna().sum()
+    print(f"Rows without condition: {missing}")
+
+    # Sanity check: unique wells before/after
+    print(f'Unique wells before: {df["well_id"].nunique()}', f'Unique wells after: {df_merged["well_id"].nunique()}')
+
+    # Print the feature names
+    print(df.columns)
+
+    return df_merged
+
+
