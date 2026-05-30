@@ -24,6 +24,7 @@ tqdm = ">=4.67.3,<5"
 
 [tool.pixi.tasks]
 edit = "marimo edit src/app.py"
+data_analysis = "marimo run src/app.py"
 test = "pytest"
 lint = "ruff check src"
 format = "ruff format src"

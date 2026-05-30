@@ -1,3 +1,8 @@
+---
+title: Readme
+marimo-version: 0.23.8
+---
+
 # marimo + pixi Starter Template
 
 A starter template for [marimo](https://marimo.io) notebooks using [pixi](https://github.com/prefix-dev/pixi) for dependency and project management. This template provides a modern Python development setup with best practices for notebook development.

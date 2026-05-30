@@ -6,15 +6,12 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
-    import marimo as mo
     from pathlib import Path
-    import os
-    import sys
-    from tqdm import tqdm
+
+    import marimo as mo
+    import matplotlib.pyplot as plt
     import pandas as pd
     import seaborn as sns
-    import matplotlib.pyplot as plt
-    import plotly.express as px
 
     from utils_data_analysis import merge_csv_files
 
@@ -26,7 +23,7 @@ def _(Path, merge_csv_files, pd):
     # Point to the results directory
     results_directory = Path("raw_data/8052_CLDN1.OCLN.ECAD")
 
-    # Extract the experiment name from the results directory (capture the full name, including all extensions)
+    # Extract the experiment name from the results directory
     experiment_id = results_directory.name
 
     # Point to the conditions file
@@ -40,19 +37,13 @@ def _(Path, merge_csv_files, pd):
 @app.cell
 def _(df_merged, mo):
     group_options = ["1", "2", "3", "4", "5"]
-    group_radio = mo.ui.radio(
-        options=group_options, value=group_options[0], label="Group to plot"
-    )
+    group_radio = mo.ui.radio(options=group_options, value=group_options[0], label="Group to plot")
 
     x_options = list(df_merged.columns)
-    x_radio = mo.ui.radio(
-        options=x_options, value=x_options[5], label="X-axis variable"
-    )
+    x_radio = mo.ui.radio(options=x_options, value=x_options[5], label="X-axis variable")
 
     y_options = list(df_merged.columns)
-    y_radio = mo.ui.radio(
-        options=y_options, value=y_options[32], label="Y-axis variable"
-    )
+    y_radio = mo.ui.radio(options=y_options, value=y_options[32], label="Y-axis variable")
     return group_radio, x_radio, y_radio
 
 
