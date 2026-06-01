@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.8"
-app = marimo.App(width="medium")
+app = marimo.App(width="full")
 
 
 @app.cell
@@ -49,68 +49,163 @@ def _(pl):
 
 @app.cell
 def _(lazy_df):
-    lazy_df.collect_schema().names()  # Efficient equivalent of df.columns
-    return
+    df_columns = (
+        lazy_df.collect_schema().names()
+    )  # Efficient equivalent of df.columns
+    keywords = ["area", "solidity", "mean_int", "sum_int", "max_mean"]
+    exclude_keywords = ["bbox", "convex", "filled", "equivalent"]
+    features_to_plot = [
+        col
+        for col in df_columns
+        if any(kw in col for kw in keywords)
+        and not any(ex_kw in col for ex_kw in exclude_keywords)
+    ]
+    return (features_to_plot,)
 
 
 @app.cell
-def _(df_merged, mo):
-    group_options = ["1", "2", "3", "4", "5"]
-    group_radio = mo.ui.radio(options=group_options, value=group_options[0], label="Group to plot")
-
-    x_options = list(df_merged.columns)
-    x_radio = mo.ui.radio(options=x_options, value=x_options[5], label="X-axis variable")
-
-    y_options = list(df_merged.columns)
-    y_radio = mo.ui.radio(options=y_options, value=y_options[32], label="Y-axis variable")
-    return group_radio, x_radio, y_radio
+def _(lazy_df):
+    donor_ids = sorted(
+        str(d)
+        for d in set(
+            lazy_df.select("donor_id").collect().get_column("donor_id").to_list()
+        )
+        if d is not None
+    )
+    return (donor_ids,)
 
 
 @app.cell
-def _(group_radio, mo, x_radio, y_radio):
+def _(donor_ids, features_to_plot, mo):
+    def make_controls(suffix: str):
+        return (
+            mo.ui.radio(
+                options=donor_ids,
+                value=donor_ids[0] if donor_ids else None,
+                label=f"Donor ID ({suffix})",
+            ),
+            mo.ui.radio(
+                options=features_to_plot,
+                value=features_to_plot[5],
+                label=f"X-axis ({suffix})",
+            ),
+        )
+
+    group_radio_row, x_radio_row = make_controls("row layout")
+    return group_radio_row, x_radio_row
+
+
+@app.cell
+def _(donor_ids, mo):
+    donor_multiselect = mo.ui.multiselect(
+        options=donor_ids,
+        value=[donor_ids[0]] if donor_ids else None,
+        label="**Donor IDs (`mo.ui.multiselect`)**",
+    )
+    return (donor_multiselect,)
+
+
+@app.cell
+def _(donor_multiselect, mo):
     mo.vstack(
         [
-            mo.md("## Choose group and variables to plot"),
-            mo.hstack([group_radio, x_radio, y_radio], gap=3),
+            mo.md("### Multiselect demo"),
+            donor_multiselect,
+            mo.md(f"Currently selected: `{donor_multiselect.value}`"),
+        ],
+        gap=1,
+    )
+    return
+
+
+@app.cell
+def _(donor_multiselect):
+    print("multiselect.value:", donor_multiselect.value)
+    print("multiselect.value type:", type(donor_multiselect.value))
+    return
+
+
+@app.cell
+def _(donor_ids, mo):
+    donor_checkbox_array = mo.ui.array(
+        [
+            mo.ui.checkbox(label=donor_id, value=(i == 0))
+            for i, donor_id in enumerate(donor_ids)
         ]
     )
+    return (donor_checkbox_array,)
+
+
+@app.cell
+def _(donor_checkbox_array, donor_ids, mo):
+    selected_donors = [
+        donor_id
+        for donor_id, checked in zip(donor_ids, donor_checkbox_array.value)
+        if checked
+    ]
+
+    mo.vstack(
+        [
+            mo.md("### Checkbox array demo (`mo.ui.array`)"),
+            donor_checkbox_array,
+            mo.md(f"Currently selected: `{selected_donors}`"),
+        ],
+        gap=1,
+    )
+    return (selected_donors,)
+
+
+@app.cell
+def _(donor_checkbox_array, selected_donors):
+    print("array.value (per-checkbox booleans):", donor_checkbox_array.value)
+    print("selected donor IDs from array:", selected_donors)
     return
 
 
 @app.cell
-def _(group_radio, x_radio, y_radio):
-    print(group_radio.value)
-    print(x_radio.value)
-    print(y_radio.value)
-    return
+def _(lazy_df, pl):
+    # Filter out cells not present in organoids (shared by all layout demos)
+    df_collected = lazy_df.filter(pl.col("organoid") != 0).collect()
+    return (df_collected,)
 
 
 @app.cell
-def _(df_merged, mo, plt, sns, x_radio, y_radio):
-    # Filter out cells not present in organoids
-    df_filtered = df_merged[df_merged["organoid"] != 0]
+def _(plt, sns):
+    def build_histogram(df_collected, x_var):
+        plt.figure(figsize=(8, 4))
+        sns.histplot(
+            df_collected[x_var].to_numpy(),
+            bins=100,
+            color="blue",
+            alpha=0.5,
+            label=x_var,
+        )
+        plt.legend()
+        plt.xlabel(x_var)
+        plt.ylabel("Count")
+        plt.title(f"Distribution of {x_var}")
+        return plt.gcf()
 
-    plt.figure(figsize=(10, 5))
-    sns.histplot(
-        df_filtered[x_radio.value],
-        bins=100,
-        color="blue",
-        alpha=0.5,
-        label=x_radio.value,
-    )
-    sns.histplot(
-        df_filtered[y_radio.value],
-        bins=100,
-        color="red",
-        alpha=0.5,
-        label=y_radio.value,
-    )
-    plt.legend()
-    plt.xlabel("Area")
-    plt.ylabel("Count")
-    plt.title("Distribution of Cell and Membrane Area")
+    return (build_histogram,)
 
-    mo.mpl.interactive(plt.gcf())
+
+@app.cell
+def _(build_histogram, df_collected, group_radio_row, mo, x_radio_row):
+    fig_row = build_histogram(df_collected, x_radio_row.value)
+    mo.vstack(
+        [
+            mo.md(
+                "Controls and plot in one row; plot sits to the right of the X-axis radio."
+            ),
+            mo.hstack(
+                [group_radio_row, x_radio_row, mo.mpl.interactive(fig_row)],
+                gap=3,
+                align="start",
+                widths=[1, 2, 5],
+            ),
+        ],
+        gap=1,
+    )
     return
 
 
