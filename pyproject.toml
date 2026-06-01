@@ -21,6 +21,7 @@ pandas = ">=3.0.3,<4"
 seaborn = ">=0.13.2,<0.14"
 plotly = ">=6.6.0,<7"
 tqdm = ">=4.67.3,<5"
+polars = ">=1.41.2,<2"
 
 [tool.pixi.tasks]
 edit = "marimo edit src/app.py"
