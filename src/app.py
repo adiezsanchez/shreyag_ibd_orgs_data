@@ -10,28 +10,47 @@ def _():
 
     import marimo as mo
     import matplotlib.pyplot as plt
-    import pandas as pd
+    import polars as pl
     import seaborn as sns
 
     from utils_data_analysis import merge_csv_files
 
-    return Path, merge_csv_files, mo, pd, plt, sns
+    return Path, merge_csv_files, mo, pl, plt, sns
 
 
 @app.cell
-def _(Path, merge_csv_files, pd):
-    # Point to the results directory
-    results_directory = Path("raw_data/8052_CLDN1.OCLN.ECAD")
+def _(Path, merge_csv_files, pl):
+    # Process all experiments in raw_data/
+    # Aggregate per well_id .csvs into a experiment_id .parquet file
+    raw_data_dir = Path("raw_data")
 
-    # Extract the experiment name from the results directory
-    experiment_id = results_directory.name
+    for results_directory in raw_data_dir.iterdir():
+        if results_directory.is_dir():
+            # Extract the experiment name from the results directory
+            experiment_id = results_directory.name
 
-    # Point to the conditions file
-    df_conditions = pd.read_csv(f"raw_data/{experiment_id}_conditions.csv")
+            # Point to the conditions file
+            df_conditions_path = raw_data_dir / f"{experiment_id}_conditions.csv"
+            if not df_conditions_path.exists():
+                print(f"Conditions file not found for {experiment_id}, skipping.")
+                continue
+            df_conditions = pl.read_csv(str(df_conditions_path))
 
-    # Merge all the csv files into a single dataframe
-    df_merged = merge_csv_files(results_directory, df_conditions)
-    return (df_merged,)
+            # Merge all the csv files into a single dataframe
+            merge_csv_files(results_directory, df_conditions)
+    return
+
+
+@app.cell
+def _(pl):
+    lazy_df = pl.scan_parquet("processed_data/*.parquet")
+    return (lazy_df,)
+
+
+@app.cell
+def _(lazy_df):
+    lazy_df.collect_schema().names()  # Efficient equivalent of df.columns
+    return
 
 
 @app.cell
@@ -67,7 +86,7 @@ def _(group_radio, x_radio, y_radio):
 
 
 @app.cell
-def _(df_merged, plt, sns, x_radio, y_radio):
+def _(df_merged, mo, plt, sns, x_radio, y_radio):
     # Filter out cells not present in organoids
     df_filtered = df_merged[df_merged["organoid"] != 0]
 
@@ -91,10 +110,7 @@ def _(df_merged, plt, sns, x_radio, y_radio):
     plt.ylabel("Count")
     plt.title("Distribution of Cell and Membrane Area")
 
-    # Cap the x axis if needed for better visualization
-    plt.xlim(0, 20000)
-
-    plt.show()
+    mo.mpl.interactive(plt.gcf())
     return
 
 

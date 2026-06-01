@@ -1,8 +1,10 @@
 import os
 import re
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import polars as pl
 import seaborn as sns
 
 
@@ -67,7 +69,37 @@ def get_1st_99th_percentile(series):
     return (p1, p99)
 
 
-def merge_csv_files(results_directory, df_conditions):
+def _ensure_directory_exists(directory_path):
+    """
+    Helper function to ensure a directory exists. Creates it if it does not.
+    """
+    os.makedirs(directory_path, exist_ok=True)
+
+
+def merge_csv_files(
+    results_directory: "Path",
+    df_conditions: "pl.DataFrame",
+) -> None:
+    """
+    Merge all CSV files in a directory, enrich with condition metadata,
+    and save the result as a .parquet file using polars.
+
+    Args
+    ----
+    results_directory : pathlib.Path
+        Path to the directory containing CSV files to be merged.
+    df_conditions : pl.DataFrame
+        Polars DataFrame with condition metadata (must contain "well_id" column).
+
+    Returns
+    -------
+    None
+        The merged DataFrame is saved as a Parquet file
+        in ./processed_data/{experiment_id}.parquet.
+    """
+
+    # Extract the experiment name from the results directory
+    experiment_id = results_directory.name
 
     # Get all csv files
     csv_files = sorted(results_directory.glob("*.csv"))
@@ -75,21 +107,30 @@ def merge_csv_files(results_directory, df_conditions):
     if not csv_files:
         raise ValueError("No CSV files found in folder")
 
-    df = pd.concat([pd.read_csv(f) for f in csv_files], ignore_index=True)
+    # Read and concatenate all CSVs using polars
+    dfs = [pl.read_csv(str(f)) for f in csv_files]
+    df = pl.concat(dfs, how="vertical_relaxed")
 
-    df_merged = df.merge(df_conditions, left_on="well_id", right_on="well_id", how="left")
+    # Merge with condition metadata (left join on 'well_id')
+    df_merged = df.join(df_conditions, on="well_id", how="left")
 
     # Sanity check: Wells in df without condition info
-    missing = df_merged["condition"].isna().sum()
+    missing = df_merged["condition"].is_null().sum()
     print(f"Rows without condition: {missing}")
 
     # Sanity check: unique wells before/after
+    unique_wells_before = df["well_id"].n_unique()
+    unique_wells_after = df_merged["well_id"].n_unique()
     print(
-        f"Unique wells before: {df['well_id'].nunique()}",
-        f"Unique wells after: {df_merged['well_id'].nunique()}",
+        f"Unique wells before: {unique_wells_before}",
+        f"Unique wells after: {unique_wells_after}",
     )
 
-    # Print the feature names
-    print(df.columns)
+    # Save the merged dataframe to ./processed_data/ as {experiment_id}.parquet
+    processed_data_dir = "./processed_data"
+    _ensure_directory_exists(processed_data_dir)
+    output_path = os.path.join(processed_data_dir, f"{experiment_id}.parquet")
+    df_merged.write_parquet(output_path)
+    print(f"Saved merged dataframe to {output_path}")
 
-    return df_merged
+    return None
