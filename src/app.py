@@ -10,11 +10,20 @@ def _():
 
     import marimo as mo
     import polars as pl
+    import seaborn as sns
 
     from utils_data_analysis import get_unique_values, merge_csv_files
     from utils_data_plotting import build_histogram
 
-    return Path, build_histogram, get_unique_values, merge_csv_files, mo, pl
+    return (
+        Path,
+        build_histogram,
+        get_unique_values,
+        merge_csv_files,
+        mo,
+        pl,
+        sns,
+    )
 
 
 @app.cell
@@ -72,9 +81,7 @@ def _(get_unique_values, lazy_df):
     # Generate options for group_id (groups of variables to plot)
     group_ids = get_unique_values(df=lazy_df, column_name="group_number")
 
-    # Generate options for treatment_id
-    treatment_ids = get_unique_values(df=lazy_df, column_name="condition")
-    return donor_ids, group_ids, treatment_ids
+    return donor_ids, group_ids
 
 
 @app.cell
@@ -92,7 +99,23 @@ def _(donor_ids, features_to_plot, group_ids, mo):
     )
 
     x_radio = mo.ui.radio(options=features_to_plot, value=features_to_plot[5], label="X-axis")
-    return donor_checkbox_array, group_radio, x_radio
+    y_radio = mo.ui.radio(options=features_to_plot, value=features_to_plot[6], label="Y-axis")
+
+    # Generate data aggregation strategy UI element
+    aggregation_strategies = ["single_cell", "organoid", "well"]
+
+    aggregation_radio = mo.ui.radio(
+        options=aggregation_strategies,
+        value="well",
+        label="Aggregate data (average) by:",
+    )
+    return (
+        aggregation_radio,
+        donor_checkbox_array,
+        group_radio,
+        x_radio,
+        y_radio,
+    )
 
 
 @app.cell
@@ -113,24 +136,24 @@ def _(
     x_radio,
 ):
     # Collect selected donors from the checkbox_array
-    selected_donors = [
+    _selected_donors = [
         donor_id
         for donor_id, checked in zip(donor_ids, donor_checkbox_array.value, strict=True)
         if checked
     ]
 
     # Filter by DataFrame by donor
-    if selected_donors:
-        df_plot = df_collected.filter(pl.col("donor_id").cast(pl.Utf8).is_in(selected_donors))
-        hue_var = "donor_id"
+    if _selected_donors:
+        _df_plot = df_collected.filter(pl.col("donor_id").cast(pl.Utf8).is_in(_selected_donors))
+        _hue_var = "donor_id"
     else:  # if no donor selected plot all
-        df_plot = df_collected
-        hue_var = None
+        _df_plot = df_collected
+        _hue_var = None
 
     fig_row = build_histogram(
-        df=df_plot,
+        df=_df_plot,
         x_var=x_radio.value,
-        hue_var=hue_var,
+        hue_var=_hue_var,
         cmap_name="viridis",
     )
 
@@ -150,13 +173,103 @@ def _(
         ],
         gap=1,
     )
-    return (selected_donors,)
+    return
 
 
 @app.cell
-def _(donor_checkbox_array, selected_donors):
-    print("array.value (per-checkbox booleans):", donor_checkbox_array.value)
-    print("selected donor IDs from array:", selected_donors)
+def _(
+    aggregation_radio,
+    df_collected,
+    donor_checkbox_array,
+    donor_ids,
+    group_radio,
+    mo,
+    pl,
+    sns,
+    x_radio,
+    y_radio,
+):
+    # Collect selected donors from the checkbox_array
+    selected_donors = [
+        donor_id
+        for donor_id, checked in zip(donor_ids, donor_checkbox_array.value, strict=True)
+        if checked
+    ]
+
+    # Filter DataFrame by donor selection first
+    if selected_donors:
+        df_plot = df_collected.filter(pl.col("donor_id").cast(pl.Utf8).is_in(selected_donors))
+    else:  # if no donor selected plot all
+        df_plot = df_collected
+
+    # Build dataframe variants for downstream pair/joint plots
+    if aggregation_radio.value == "single_cell":
+        df_plot_aggregated = df_plot
+    elif aggregation_radio.value == "well":
+        df_plot_aggregated = (
+            df_plot.group_by(["well_id", "condition"])
+            .mean()
+            .drop(["organoid", "multiposition_id", "label"], strict=False)
+        )
+    else:  # aggregation_radio.value == "organoid"
+        df_plot_with_organoid_id = df_plot.with_columns(
+            pl.concat_str(
+                [
+                    pl.col("multiposition_id").cast(pl.Utf8),
+                    pl.col("organoid").cast(pl.Utf8),
+                ],
+                separator="_",
+            ).alias("unique_organoid_id")
+        )
+        df_plot_aggregated = (
+            df_plot_with_organoid_id.group_by(["well_id", "unique_organoid_id", "condition"])
+            .mean()
+            .drop(["organoid", "multiposition_id", "label"], strict=False)
+        )
+
+    dataframe = df_plot_aggregated.to_pandas()
+    g = sns.jointplot(
+        x=x_radio.value,
+        y=y_radio.value,
+        data=dataframe,
+        hue="condition",
+        joint_kws=dict(alpha=0.4, s=20),
+    )
+    # Move legend outside the main axes so it does not cover data points
+    sns.move_legend(
+        g.ax_joint,
+        "upper left",
+        bbox_to_anchor=(1.22, 1),
+        borderaxespad=0,
+        title="simplified",
+    )
+    g.figure.suptitle(f"Data aggregation: {aggregation_radio.value}", fontsize=14)
+    g.figure.subplots_adjust(top=0.93, right=0.66)
+
+    mo.vstack(
+        [
+            mo.md("Single cell feature value distribution"),
+            mo.hstack(
+                [
+                    donor_checkbox_array,
+                    aggregation_radio,
+                    group_radio,
+                    x_radio,
+                    y_radio,
+                    mo.mpl.interactive(g.figure),
+                ],
+                gap=3,
+                align="start",
+                widths=[1, 1, 1, 1, 1, 10],
+            ),
+        ],
+        gap=1,
+    )
+    return
+
+
+@app.cell
+def _():
     return
 
 
