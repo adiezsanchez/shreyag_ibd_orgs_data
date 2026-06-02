@@ -43,6 +43,7 @@ def _(Path, merge_csv_files, pl):
 
 @app.cell
 def _(pl):
+    # Aggregate all experiments into a single lazy DataFrame
     lazy_df = pl.scan_parquet("processed_data/*.parquet")
     return (lazy_df,)
 
@@ -87,7 +88,7 @@ def _(lazy_df):
 
 @app.cell
 def _(donor_ids, features_to_plot, group_ids, mo):
-    # Generate UI elements for histogram
+    # Generate UI elements for the different plots
     donor_checkbox_array = mo.ui.array(
         [mo.ui.checkbox(label=donor_id, value=(i == 0)) for i, donor_id in enumerate(donor_ids)],
         label="Donor ID (multiselect)",
@@ -112,16 +113,28 @@ def _(lazy_df, pl):
 
 @app.cell
 def _(plt, sns):
-    def build_histogram(df_collected, x_var):
+    def build_histogram(df, x_var, hue_var=None, cmap_name="viridis", bins=100):
         plt.figure(figsize=(8, 4))
+        plot_df = df.to_pandas()
+
+        palette = None
+        if hue_var is not None:
+            hue_levels = sorted(plot_df[hue_var].dropna().unique(), key=str)
+            cmap = plt.get_cmap(cmap_name)
+            palette = {
+                level: cmap(i / max(len(hue_levels) - 1, 1)) for i, level in enumerate(hue_levels)
+            }
+
         sns.histplot(
-            df_collected[x_var].to_numpy(),
-            bins=100,
-            color="blue",
+            data=plot_df,
+            x=x_var,
+            hue=hue_var,
+            bins=bins,
             alpha=0.5,
-            label=x_var,
+            palette=palette,
+            common_norm=False,
         )
-        plt.legend()
+
         plt.xlabel(x_var)
         plt.ylabel("Count")
         plt.title(f"Distribution of {x_var}")
@@ -136,27 +149,38 @@ def _(
     df_collected,
     donor_checkbox_array,
     donor_ids,
-    group_radio,
     mo,
+    pl,
     x_radio,
 ):
-    fig_row = build_histogram(df_collected, x_radio.value)
-
+    # Collect selected donors from the checkbox_array
     selected_donors = [
         donor_id
-        for donor_id, checked in zip(
-            donor_ids, donor_checkbox_array.value, strict=True
-        )
+        for donor_id, checked in zip(donor_ids, donor_checkbox_array.value, strict=True)
         if checked
     ]
 
+    # Filter by DataFrame by donor
+    if selected_donors:
+        df_plot = df_collected.filter(pl.col("donor_id").cast(pl.Utf8).is_in(selected_donors))
+        hue_var = "donor_id"
+    else:  # if no donor selected plot all
+        df_plot = df_collected
+        hue_var = None
+
+    fig_row = build_histogram(
+        df=df_plot,
+        x_var=x_radio.value,
+        hue_var=hue_var,
+        cmap_name="viridis",
+    )
+
     mo.vstack(
         [
-            mo.md("Feature value distribution"),
+            mo.md("Single cell feature value distribution"),
             mo.hstack(
                 [
                     donor_checkbox_array,
-                    group_radio,
                     x_radio,
                     mo.mpl.interactive(fig_row),
                 ],
