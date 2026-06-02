@@ -12,12 +12,19 @@ def _():
     import polars as pl
     import seaborn as sns
 
-    from utils_data_analysis import get_unique_values, merge_csv_files
+    from utils_data_analysis import (
+        build_condition_order_by_group,
+        condition_hue_order,
+        get_unique_values,
+        merge_csv_files,
+    )
     from utils_data_plotting import build_histogram
 
     return (
         Path,
+        build_condition_order_by_group,
         build_histogram,
+        condition_hue_order,
         get_unique_values,
         merge_csv_files,
         mo,
@@ -92,9 +99,10 @@ def _(donor_ids, features_to_plot, group_ids, mo):
         label="Donor ID (multiselect)",
     )
 
+    group_options = ["None", *group_ids]
     group_radio = mo.ui.radio(
-        options=group_ids,
-        value=group_ids[0] if group_ids else None,
+        options=group_options,
+        value="None",
         label="Group plots",
     )
 
@@ -119,10 +127,11 @@ def _(donor_ids, features_to_plot, group_ids, mo):
 
 
 @app.cell
-def _(lazy_df, pl):
+def _(build_condition_order_by_group, lazy_df, pl):
     # Filter out cells not present in organoids
     df_collected = lazy_df.filter(pl.col("organoid") != 0).collect()
-    return (df_collected,)
+    condition_order_by_group = build_condition_order_by_group(df_collected)
+    return condition_order_by_group, df_collected
 
 
 @app.cell
@@ -168,7 +177,7 @@ def _(
                 ],
                 gap=3,
                 align="start",
-                widths=[1, 1, 2, 5],
+                widths=[1, 1, 2],
             ),
         ],
         gap=1,
@@ -179,6 +188,8 @@ def _(
 @app.cell
 def _(
     aggregation_radio,
+    condition_hue_order,
+    condition_order_by_group,
     df_collected,
     donor_checkbox_array,
     donor_ids,
@@ -202,12 +213,17 @@ def _(
     else:  # if no donor selected plot all
         df_plot = df_collected
 
+    # Filter DataFrame by treatment group only when one is selected
+    selected_group = group_radio.value
+    if selected_group and selected_group != "None":
+        df_plot = df_plot.filter(pl.col("group_number").cast(pl.Utf8) == selected_group)
+
     # Build dataframe variants for downstream pair/joint plots
     if aggregation_radio.value == "single_cell":
         df_plot_aggregated = df_plot
     elif aggregation_radio.value == "well":
         df_plot_aggregated = (
-            df_plot.group_by(["well_id", "condition"])
+            df_plot.group_by(["donor_id", "well_id", "condition"])
             .mean()
             .drop(["organoid", "multiposition_id", "label"], strict=False)
         )
@@ -222,33 +238,45 @@ def _(
             ).alias("unique_organoid_id")
         )
         df_plot_aggregated = (
-            df_plot_with_organoid_id.group_by(["well_id", "unique_organoid_id", "condition"])
+            df_plot_with_organoid_id.group_by(
+                ["well_id", "unique_organoid_id", "condition", "donor_id"]
+            )
             .mean()
             .drop(["organoid", "multiposition_id", "label"], strict=False)
         )
 
     dataframe = df_plot_aggregated.to_pandas()
-    g = sns.jointplot(
+    present_conditions = set(dataframe["condition"].dropna().astype(str))
+    hue_order = condition_hue_order(
+        condition_order_by_group,
+        selected_group=selected_group,
+        present_conditions=present_conditions,
+    )
+    jointplot_kws = dict(
         x=x_radio.value,
         y=y_radio.value,
         data=dataframe,
         hue="condition",
         joint_kws=dict(alpha=0.4, s=20),
     )
+    if hue_order:
+        jointplot_kws["hue_order"] = hue_order
+    g = sns.jointplot(**jointplot_kws)
+    g.figure.set_size_inches(12, 7)
     # Move legend outside the main axes so it does not cover data points
     sns.move_legend(
         g.ax_joint,
         "upper left",
         bbox_to_anchor=(1.22, 1),
         borderaxespad=0,
-        title="simplified",
+        title="Treatment",
     )
     g.figure.suptitle(f"Data aggregation: {aggregation_radio.value}", fontsize=14)
-    g.figure.subplots_adjust(top=0.93, right=0.66)
+    g.figure.subplots_adjust(top=0.93, right=0.74)
 
     mo.vstack(
         [
-            mo.md("Single cell feature value distribution"),
+            mo.md("Feature correlation plots"),
             mo.hstack(
                 [
                     donor_checkbox_array,
