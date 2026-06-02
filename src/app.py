@@ -49,122 +49,63 @@ def _(pl):
 
 @app.cell
 def _(lazy_df):
-    df_columns = (
-        lazy_df.collect_schema().names()
-    )  # Efficient equivalent of df.columns
+    # Efficient equivalent of df.columns
+    df_columns = lazy_df.collect_schema().names()
+
+    # Remove metadata and unwanted features from features to plot
     keywords = ["area", "solidity", "mean_int", "sum_int", "max_mean"]
     exclude_keywords = ["bbox", "convex", "filled", "equivalent"]
     features_to_plot = [
         col
         for col in df_columns
-        if any(kw in col for kw in keywords)
-        and not any(ex_kw in col for ex_kw in exclude_keywords)
+        if any(kw in col for kw in keywords) and not any(ex_kw in col for ex_kw in exclude_keywords)
     ]
     return (features_to_plot,)
 
 
 @app.cell
 def _(lazy_df):
-    donor_ids = sorted(
-        str(d)
-        for d in set(
-            lazy_df.select("donor_id").collect().get_column("donor_id").to_list()
+    # Dinamically generate options from metadata columns
+    def get_unique_values(column_name):
+        options = sorted(
+            str(d)
+            for d in set(lazy_df.select(column_name).collect().get_column(column_name).to_list())
+            if d is not None
         )
-        if d is not None
-    )
-    return (donor_ids,)
+        return options
+
+    # Generate options for donor_id
+    donor_ids = get_unique_values("donor_id")
+
+    # Generate options for group_id (groups of variables to plot)
+    group_ids = get_unique_values("group_number")
+
+    # Generate options for treatment_id
+    treatment_ids = get_unique_values("condition")
+    return donor_ids, group_ids, treatment_ids
 
 
 @app.cell
-def _(donor_ids, features_to_plot, mo):
-    def make_controls(suffix: str):
-        return (
-            mo.ui.radio(
-                options=donor_ids,
-                value=donor_ids[0] if donor_ids else None,
-                label=f"Donor ID ({suffix})",
-            ),
-            mo.ui.radio(
-                options=features_to_plot,
-                value=features_to_plot[5],
-                label=f"X-axis ({suffix})",
-            ),
-        )
-
-    group_radio_row, x_radio_row = make_controls("row layout")
-    return group_radio_row, x_radio_row
-
-
-@app.cell
-def _(donor_ids, mo):
-    donor_multiselect = mo.ui.multiselect(
-        options=donor_ids,
-        value=[donor_ids[0]] if donor_ids else None,
-        label="**Donor IDs (`mo.ui.multiselect`)**",
-    )
-    return (donor_multiselect,)
-
-
-@app.cell
-def _(donor_multiselect, mo):
-    mo.vstack(
-        [
-            mo.md("### Multiselect demo"),
-            donor_multiselect,
-            mo.md(f"Currently selected: `{donor_multiselect.value}`"),
-        ],
-        gap=1,
-    )
-    return
-
-
-@app.cell
-def _(donor_multiselect):
-    print("multiselect.value:", donor_multiselect.value)
-    print("multiselect.value type:", type(donor_multiselect.value))
-    return
-
-
-@app.cell
-def _(donor_ids, mo):
+def _(donor_ids, features_to_plot, group_ids, mo):
+    # Generate UI elements for histogram
     donor_checkbox_array = mo.ui.array(
-        [
-            mo.ui.checkbox(label=donor_id, value=(i == 0))
-            for i, donor_id in enumerate(donor_ids)
-        ]
+        [mo.ui.checkbox(label=donor_id, value=(i == 0)) for i, donor_id in enumerate(donor_ids)],
+        label="Donor ID (multiselect)",
     )
-    return (donor_checkbox_array,)
 
-
-@app.cell
-def _(donor_checkbox_array, donor_ids, mo):
-    selected_donors = [
-        donor_id
-        for donor_id, checked in zip(donor_ids, donor_checkbox_array.value)
-        if checked
-    ]
-
-    mo.vstack(
-        [
-            mo.md("### Checkbox array demo (`mo.ui.array`)"),
-            donor_checkbox_array,
-            mo.md(f"Currently selected: `{selected_donors}`"),
-        ],
-        gap=1,
+    group_radio = mo.ui.radio(
+        options=group_ids,
+        value=group_ids[0] if group_ids else None,
+        label="Group plots",
     )
-    return (selected_donors,)
 
-
-@app.cell
-def _(donor_checkbox_array, selected_donors):
-    print("array.value (per-checkbox booleans):", donor_checkbox_array.value)
-    print("selected donor IDs from array:", selected_donors)
-    return
+    x_radio = mo.ui.radio(options=features_to_plot, value=features_to_plot[5], label="X-axis")
+    return donor_checkbox_array, group_radio, x_radio
 
 
 @app.cell
 def _(lazy_df, pl):
-    # Filter out cells not present in organoids (shared by all layout demos)
+    # Filter out cells not present in organoids
     df_collected = lazy_df.filter(pl.col("organoid") != 0).collect()
     return (df_collected,)
 
@@ -190,22 +131,49 @@ def _(plt, sns):
 
 
 @app.cell
-def _(build_histogram, df_collected, group_radio_row, mo, x_radio_row):
-    fig_row = build_histogram(df_collected, x_radio_row.value)
+def _(
+    build_histogram,
+    df_collected,
+    donor_checkbox_array,
+    donor_ids,
+    group_radio,
+    mo,
+    x_radio,
+):
+    fig_row = build_histogram(df_collected, x_radio.value)
+
+    selected_donors = [
+        donor_id
+        for donor_id, checked in zip(
+            donor_ids, donor_checkbox_array.value, strict=True
+        )
+        if checked
+    ]
+
     mo.vstack(
         [
-            mo.md(
-                "Controls and plot in one row; plot sits to the right of the X-axis radio."
-            ),
+            mo.md("Feature value distribution"),
             mo.hstack(
-                [group_radio_row, x_radio_row, mo.mpl.interactive(fig_row)],
+                [
+                    donor_checkbox_array,
+                    group_radio,
+                    x_radio,
+                    mo.mpl.interactive(fig_row),
+                ],
                 gap=3,
                 align="start",
-                widths=[1, 2, 5],
+                widths=[1, 1, 2, 5],
             ),
         ],
         gap=1,
     )
+    return (selected_donors,)
+
+
+@app.cell
+def _(donor_checkbox_array, selected_donors):
+    print("array.value (per-checkbox booleans):", donor_checkbox_array.value)
+    print("selected donor IDs from array:", selected_donors)
     return
 
 
