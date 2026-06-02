@@ -9,13 +9,12 @@ def _():
     from pathlib import Path
 
     import marimo as mo
-    import matplotlib.pyplot as plt
     import polars as pl
-    import seaborn as sns
 
-    from utils_data_analysis import merge_csv_files
+    from utils_data_analysis import get_unique_values, merge_csv_files
+    from utils_data_plotting import build_histogram
 
-    return Path, merge_csv_files, mo, pl, plt, sns
+    return Path, build_histogram, get_unique_values, merge_csv_files, mo, pl
 
 
 @app.cell
@@ -50,7 +49,7 @@ def _(pl):
 
 @app.cell
 def _(lazy_df):
-    # Efficient equivalent of df.columns
+    # Extract column names from DataFrame
     df_columns = lazy_df.collect_schema().names()
 
     # Remove metadata and unwanted features from features to plot
@@ -65,24 +64,16 @@ def _(lazy_df):
 
 
 @app.cell
-def _(lazy_df):
+def _(get_unique_values, lazy_df):
     # Dinamically generate options from metadata columns
-    def get_unique_values(column_name):
-        options = sorted(
-            str(d)
-            for d in set(lazy_df.select(column_name).collect().get_column(column_name).to_list())
-            if d is not None
-        )
-        return options
-
     # Generate options for donor_id
-    donor_ids = get_unique_values("donor_id")
+    donor_ids = get_unique_values(df=lazy_df, column_name="donor_id")
 
     # Generate options for group_id (groups of variables to plot)
-    group_ids = get_unique_values("group_number")
+    group_ids = get_unique_values(df=lazy_df, column_name="group_number")
 
     # Generate options for treatment_id
-    treatment_ids = get_unique_values("condition")
+    treatment_ids = get_unique_values(df=lazy_df, column_name="condition")
     return donor_ids, group_ids, treatment_ids
 
 
@@ -109,38 +100,6 @@ def _(lazy_df, pl):
     # Filter out cells not present in organoids
     df_collected = lazy_df.filter(pl.col("organoid") != 0).collect()
     return (df_collected,)
-
-
-@app.cell
-def _(plt, sns):
-    def build_histogram(df, x_var, hue_var=None, cmap_name="viridis", bins=100):
-        plt.figure(figsize=(8, 4))
-        plot_df = df.to_pandas()
-
-        palette = None
-        if hue_var is not None:
-            hue_levels = sorted(plot_df[hue_var].dropna().unique(), key=str)
-            cmap = plt.get_cmap(cmap_name)
-            palette = {
-                level: cmap(i / max(len(hue_levels) - 1, 1)) for i, level in enumerate(hue_levels)
-            }
-
-        sns.histplot(
-            data=plot_df,
-            x=x_var,
-            hue=hue_var,
-            bins=bins,
-            alpha=0.5,
-            palette=palette,
-            common_norm=False,
-        )
-
-        plt.xlabel(x_var)
-        plt.ylabel("Count")
-        plt.title(f"Distribution of {x_var}")
-        return plt.gcf()
-
-    return (build_histogram,)
 
 
 @app.cell
