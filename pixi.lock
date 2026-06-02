@@ -6008,7 +6008,7 @@ packages:
 - pypi: ./
   name: marimo-template
   version: 0.1.0
-  sha256: 831b60d2b58c7b24efc440f90e6e3db58e3276ce958df3d4fe40e1e724130ca3
+  sha256: 194c12d96687ea75676881b31d3daae8b9db5fab7365843711cf0dc18cbb9510
   requires_python: '>=3.10'
   editable: true
 - conda: https://prefix.dev/conda-forge/noarch/markdown-3.6-pyhd8ed1ab_0.conda
