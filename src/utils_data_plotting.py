@@ -1,14 +1,60 @@
-import os
-import re
-
 import matplotlib.pyplot as plt
 import pandas as pd
+import polars as pl
 import seaborn as sns
 
 
+def _to_pandas(df):
+    """
+    Convert supported dataframe inputs to a pandas DataFrame.
+
+    Parameters
+    ----------
+    df : pl.DataFrame | pd.DataFrame
+        Input dataframe to convert.
+
+    Returns
+    -------
+    pd.DataFrame
+        The converted pandas dataframe.
+
+    Raises
+    ------
+    TypeError
+        If the input type is neither pandas nor polars DataFrame.
+    """
+    if isinstance(df, pl.DataFrame):
+        return df.to_pandas()
+    if isinstance(df, pd.DataFrame):
+        return df
+    msg = f"Unsupported dataframe type: {type(df)!r}"
+    raise TypeError(msg)
+
+
 def build_histogram(df, x_var, hue_var=None, cmap_name="viridis", bins=100):
+    """
+    Plot a histogram for one feature with optional hue separation.
+
+    Parameters
+    ----------
+    df : pl.DataFrame | pd.DataFrame
+        Input dataframe containing plotting columns.
+    x_var : str
+        Feature name shown on the x-axis.
+    hue_var : str | None, optional
+        Optional column name used to color histogram groups.
+    cmap_name : str, default="viridis"
+        Name of matplotlib colormap used when hue grouping is enabled.
+    bins : int, default=100
+        Number of histogram bins.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Figure containing the histogram plot.
+    """
     plt.figure(figsize=(8, 4))
-    plot_df = df.to_pandas()
+    plot_df = _to_pandas(df)
 
     palette = None
     if hue_var is not None:
@@ -34,21 +80,52 @@ def build_histogram(df, x_var, hue_var=None, cmap_name="viridis", bins=100):
     return plt.gcf()
 
 
-def plot_plate_view(df, column_name, title, label, save_dir, fmt=3, display=True, cmap="magma"):
-    # --- Parse well_id into row (A–H) and column (1–12) ---
-    def split_well_id(well):
-        match = re.match(r"([A-H])(\d{1,2})", str(well))
-        if match:
-            row, col = match.groups()
-            return row, int(col)
-        return None, None
+def plot_plate_view(df, column_name, title, label, save_dir, fmt=0, display=True, cmap="magma"):
+    """
+    Plot a 96-well plate heatmap from well-level values.
 
-    df[["row", "col"]] = df["well_id"].apply(lambda x: pd.Series(split_well_id(x)))
+    Parameters
+    ----------
+    df : pl.DataFrame | pd.DataFrame
+        Input dataframe containing ``well_id`` and a value column.
+    column_name : str
+        Name of the numeric value column used for heatmap intensity.
+    title : str
+        Plot title.
+    label : str
+        Colorbar label text.
+    save_dir : str
+        Unused compatibility parameter retained for call-site stability.
+    fmt : int, default=0
+        Numeric precision used for cell annotations.
+    display : bool, default=True
+        Whether to display the figure via ``plt.show()``.
+    cmap : str, default="magma"
+        Colormap used by the heatmap.
 
-    # --- Pivot into 96-well plate layout ---
-    plate_matrix = df.pivot(index="row", columns="col", values=column_name)
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Figure containing the plate heatmap.
+    """
+    pl_df = df if isinstance(df, pl.DataFrame) else pl.from_pandas(_to_pandas(df))
 
-    # Reindex rows and columns to enforce full plate structure
+    plate_long = (
+        pl_df.with_columns(
+            [
+                pl.col("well_id").cast(pl.Utf8).str.extract(r"^([A-H])", 1).alias("row"),
+                pl.col("well_id")
+                .cast(pl.Utf8)
+                .str.extract(r"^[A-H](\d{1,2})$", 1)
+                .cast(pl.Int64)
+                .alias("col"),
+            ]
+        )
+        .filter(pl.col("row").is_not_null() & pl.col("col").is_not_null())
+        .select(["row", "col", column_name])
+    )
+    plate_matrix = plate_long.to_pandas().pivot(index="row", columns="col", values=column_name)
+
     rows = list("ABCDEFGH")
     cols = list(range(1, 13))
     plate_matrix = plate_matrix.reindex(index=rows, columns=cols)
@@ -72,15 +149,9 @@ def plot_plate_view(df, column_name, title, label, save_dir, fmt=3, display=True
     # Rotate row (y-axis) labels 90° to the right
     ax.set_yticklabels(ax.get_yticklabels(), rotation=-90, va="center")
 
-    # --- Save plot ---
-    save_dir_full = f"{save_dir}/plate_view/{column_name}"
-    os.makedirs(save_dir_full, exist_ok=True)
-    save_path = os.path.join(save_dir_full, f"{title}_{column_name}.png")
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    fig = plt.gcf()
 
     if display:
         plt.show()
-    else:
-        plt.close()
 
-    print(f"Saved plate view to {save_path}")
+    return fig

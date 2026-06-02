@@ -103,7 +103,7 @@ def _(donor_ids, features_to_plot, group_ids, mo):
     group_radio = mo.ui.radio(
         options=group_options,
         value="None",
-        label="Group plots",
+        label="Treatment groups",
     )
 
     x_radio = mo.ui.radio(options=features_to_plot, value=features_to_plot[5], label="X-axis")

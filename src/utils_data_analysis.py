@@ -4,18 +4,19 @@ from pathlib import Path
 import polars as pl
 
 
-def get_1st_99th_percentile(series):
-    """
-    Returns the 1st and 99th percentile values of a pandas Series as a tuple (min, max).
-    """
-    p1 = series.quantile(0.01)
-    p99 = series.quantile(0.99)
-    return (p1, p99)
-
-
 def _ensure_directory_exists(directory_path):
     """
-    Helper function to ensure a directory exists. Creates it if it does not.
+    Ensure that a directory path exists.
+
+    Parameters
+    ----------
+    directory_path : str | os.PathLike
+        Path to the directory that should exist.
+
+    Returns
+    -------
+    None
+        This function creates the directory when missing and returns nothing.
     """
     os.makedirs(directory_path, exist_ok=True)
 
@@ -25,22 +26,29 @@ def merge_csv_files(
     df_conditions: "pl.DataFrame",
 ) -> None:
     """
-    Merge all CSV files in a directory, enrich with condition metadata,
-    and save the result as a .parquet file using polars.
-    If the corresponding .parquet file already exists, skip processing.
+    Merge all CSV files in a directory and save one parquet dataset.
 
-    Args
-    ----
-    results_directory : pathlib.Path
+    The function joins per-file measurements with condition metadata and writes
+    a single parquet file under ``./processed_data``. If the output file
+    already exists, processing is skipped.
+
+    Parameters
+    ----------
+    results_directory : Path
         Path to the directory containing CSV files to be merged.
     df_conditions : pl.DataFrame
-        Polars DataFrame with condition metadata (must contain "well_id" column).
+        Condition metadata containing at least the ``well_id`` column.
 
     Returns
     -------
     None
-        The merged DataFrame is saved as a Parquet file
-        in ./processed_data/{experiment_id}.parquet, unless it already exists.
+        The merged data is written to
+        ``./processed_data/{experiment_id}.parquet``.
+
+    Raises
+    ------
+    ValueError
+        If the input directory contains no CSV files.
     """
 
     # Extract the experiment name from the results directory
@@ -89,6 +97,21 @@ def merge_csv_files(
 
 
 def get_unique_values(df, column_name):
+    """
+    Return sorted unique non-null values from a column as strings.
+
+    Parameters
+    ----------
+    df : pl.LazyFrame | pl.DataFrame
+        Input dataframe containing the requested column.
+    column_name : str
+        Name of the column from which unique values are extracted.
+
+    Returns
+    -------
+    list[str]
+        Sorted unique values represented as strings.
+    """
     options = sorted(
         str(d)
         for d in set(df.select(column_name).collect().get_column(column_name).to_list())
@@ -103,6 +126,16 @@ def build_condition_order_by_group(df: pl.DataFrame | pl.LazyFrame) -> dict[str,
 
     Order is derived by sorting wells within each group so legend colors stay
     consistent when changing donors, without forcing every treatment globally.
+
+    Parameters
+    ----------
+    df : pl.DataFrame | pl.LazyFrame
+        Dataframe containing ``group_number``, ``well_id``, and ``condition``.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Mapping from group identifier to ordered condition labels.
     """
     if isinstance(df, pl.LazyFrame):
         df = df.collect()
@@ -147,7 +180,24 @@ def condition_hue_order(
     selected_group: str | None,
     present_conditions: set[str],
 ) -> list[str] | None:
-    """Build hue_order for seaborn: per-group when filtered, merged otherwise."""
+    """
+    Build a seaborn hue order constrained to conditions present in data.
+
+    Parameters
+    ----------
+    condition_order_by_group : dict[str, list[str]]
+        Mapping of group identifier to ordered condition labels.
+    selected_group : str | None
+        Currently selected group. Use ``None`` or ``"None"`` for all groups.
+    present_conditions : set[str]
+        Condition labels present in the current filtered dataset.
+
+    Returns
+    -------
+    list[str] | None
+        Ordered condition labels for plotting, or ``None`` when no labels
+        are available.
+    """
     if selected_group and selected_group != "None":
         group_order = condition_order_by_group.get(selected_group, [])
         return [c for c in group_order if c in present_conditions]
