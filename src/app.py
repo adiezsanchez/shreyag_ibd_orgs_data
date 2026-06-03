@@ -9,6 +9,7 @@ def _():
     from pathlib import Path
 
     import marimo as mo
+    import plotly.express as px
     import polars as pl
     import seaborn as sns
 
@@ -29,6 +30,7 @@ def _():
         merge_csv_files,
         mo,
         pl,
+        px,
         sns,
     )
 
@@ -87,7 +89,6 @@ def _(get_unique_values, lazy_df):
 
     # Generate options for group_id (groups of variables to plot)
     group_ids = get_unique_values(df=lazy_df, column_name="group_number")
-
     return donor_ids, group_ids
 
 
@@ -194,31 +195,23 @@ def _(
     donor_checkbox_array,
     donor_ids,
     group_radio,
-    mo,
     pl,
-    sns,
-    x_radio,
-    y_radio,
 ):
-    # Collect selected donors from the checkbox_array
     selected_donors = [
         donor_id
         for donor_id, checked in zip(donor_ids, donor_checkbox_array.value, strict=True)
         if checked
     ]
 
-    # Filter DataFrame by donor selection first
     if selected_donors:
         df_plot = df_collected.filter(pl.col("donor_id").cast(pl.Utf8).is_in(selected_donors))
-    else:  # if no donor selected plot all
+    else:
         df_plot = df_collected
 
-    # Filter DataFrame by treatment group only when one is selected
     selected_group = group_radio.value
     if selected_group and selected_group != "None":
         df_plot = df_plot.filter(pl.col("group_number").cast(pl.Utf8) == selected_group)
 
-    # Build dataframe variants for downstream pair/joint plots
     if aggregation_radio.value == "single_cell":
         df_plot_aggregated = df_plot
     elif aggregation_radio.value == "well":
@@ -227,7 +220,7 @@ def _(
             .mean()
             .drop(["organoid", "multiposition_id", "label"], strict=False)
         )
-    else:  # aggregation_radio.value == "organoid"
+    else:
         df_plot_with_organoid_id = df_plot.with_columns(
             pl.concat_str(
                 [
@@ -245,17 +238,90 @@ def _(
             .drop(["organoid", "multiposition_id", "label"], strict=False)
         )
 
-    dataframe = df_plot_aggregated.to_pandas()
-    present_conditions = set(dataframe["condition"].dropna().astype(str))
+    correlation_dataframe = df_plot_aggregated.to_pandas()
+    present_conditions = set(correlation_dataframe["condition"].dropna().astype(str))
     hue_order = condition_hue_order(
         condition_order_by_group,
         selected_group=selected_group,
         present_conditions=present_conditions,
     )
+    return correlation_dataframe, hue_order, selected_group
+
+
+@app.cell
+def _(
+    aggregation_radio,
+    correlation_dataframe,
+    donor_checkbox_array,
+    group_radio,
+    hue_order,
+    mo,
+    px,
+    x_radio,
+    y_radio,
+):
+    _x_col = x_radio.value
+    _y_col = y_radio.value
+    dataframe = correlation_dataframe[["condition", "donor_id", _x_col, _y_col]].dropna(
+        subset=[_x_col, _y_col]
+    )
+    _scatter_kws = {
+        "x": _x_col,
+        "y": _y_col,
+        "color": "condition",
+        "hover_data": ["donor_id"],
+        "marginal_x": "violin",
+        "marginal_y": "violin",
+        "opacity": 0.4,
+        "title": f"Data aggregation: {aggregation_radio.value}",
+    }
+    if hue_order:
+        _scatter_kws["category_orders"] = {"condition": hue_order}
+    _fig = px.scatter(dataframe, **_scatter_kws)
+    _fig.update_layout(
+        height=700,
+        width=1000,
+        legend_title_text="Treatment",
+    )
+
+    mo.vstack(
+        [
+            mo.md("Feature correlation plots (Plotly)"),
+            mo.hstack(
+                [
+                    donor_checkbox_array,
+                    aggregation_radio,
+                    group_radio,
+                    x_radio,
+                    y_radio,
+                    mo.ui.plotly(_fig),
+                ],
+                gap=3,
+                align="start",
+                widths=[1, 1, 1, 1, 1, 10],
+            ),
+        ],
+        gap=1,
+    )
+    return
+
+
+@app.cell
+def _(
+    aggregation_radio,
+    correlation_dataframe,
+    donor_checkbox_array,
+    group_radio,
+    hue_order,
+    mo,
+    sns,
+    x_radio,
+    y_radio,
+):
     jointplot_kws = dict(
         x=x_radio.value,
         y=y_radio.value,
-        data=dataframe,
+        data=correlation_dataframe,
         hue="condition",
         joint_kws=dict(alpha=0.4, s=20),
     )
@@ -276,7 +342,7 @@ def _(
 
     mo.vstack(
         [
-            mo.md("Feature correlation plots"),
+            mo.md("Feature correlation plots (Seaborn)"),
             mo.hstack(
                 [
                     donor_checkbox_array,
@@ -293,11 +359,6 @@ def _(
         ],
         gap=1,
     )
-    return
-
-
-@app.cell
-def _():
     return
 
 
