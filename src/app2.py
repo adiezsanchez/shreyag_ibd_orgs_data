@@ -435,7 +435,7 @@ def _(
             order=hue_order or None,
             ax=_ax,
         )
-        _ax.tick_params(axis="x", rotation=25)
+        plt.setp(_ax.get_xticklabels(), rotation=25, ha="right")
 
     _ax.set_title(f"Signal intensity ({signal_plot_type_radio.value})")
     _ax.set_xlabel(
@@ -444,6 +444,8 @@ def _(
     _ax.set_ylabel(
         "Density" if signal_plot_type_radio.value == "kde" else signal_feature_radio.value
     )
+    if signal_plot_type_radio.value == "violin":
+        _fig.tight_layout()
     mo.vstack(
         [
             mo.md("Signal intensity KDE / violin"),
@@ -747,8 +749,19 @@ def _(
 @app.cell
 def _(donor_checkbox_array, group_radio, lazy_filtered, mo, plot_plate_view, pl):
     _counts_per_well = (
-        lazy_filtered.group_by("well_id")
-        .agg([pl.len().alias("total_cell_nr"), pl.max("organoid").alias("max_organoid_id")])
+        lazy_filtered.with_columns(
+            pl.concat_str(
+                [pl.col("multiposition_id").cast(pl.Utf8), pl.col("organoid").cast(pl.Utf8)],
+                separator="_",
+            ).alias("unique_organoid_id")
+        )
+        .group_by("well_id")
+        .agg(
+            [
+                pl.len().alias("total_cell_nr"),
+                pl.col("unique_organoid_id").n_unique().alias("organoid_count"),
+            ]
+        )
         .collect()
     )
     _fig_cells = plot_plate_view(
@@ -761,9 +774,9 @@ def _(donor_checkbox_array, group_radio, lazy_filtered, mo, plot_plate_view, pl)
     )
     _fig_organoids = plot_plate_view(
         _counts_per_well,
-        column_name="max_organoid_id",
-        title="Organoid_number_per_well",
-        label="Organoid count",
+        column_name="organoid_count",
+        title="Distinct_organoids_per_well",
+        label="Distinct organoid count",
         save_dir="results",
         display=False,
     )
